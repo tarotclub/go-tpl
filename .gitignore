@@ -1,0 +1,8 @@
+# Compiled binary
+go-tpl
+
+# Test binaries
+*.test
+
+# Go build cache
+/vendor/

@@ -1,0 +1,6 @@
+app:
+  name: go-tpl
+  version: 0.1.0
+
+log:
+  level: info
