@@ -62,30 +62,38 @@ Simplification that breaks project consistency is not simplification — it's ch
 
 Explicit code is better than compact code when the compact version requires a mental pause to parse.
 
-```typescript
-// UNCLEAR: Dense ternary chain
-const label = isNew ? 'New' : isUpdated ? 'Updated' : isArchived ? 'Archived' : 'Active';
+```go
+// UNCLEAR: Dense boolean chain.
+label := "Active"
+if isNew {
+  label = "New"
+} else if isUpdated {
+  label = "Updated"
+} else if isArchived {
+  label = "Archived"
+}
 
-// CLEAR: Readable mapping
-function getStatusLabel(item: Item): string {
-  if (item.isNew) return 'New';
-  if (item.isUpdated) return 'Updated';
-  if (item.isArchived) return 'Archived';
-  return 'Active';
+// CLEAR: Readable helper.
+func getStatusLabel(item Item) string {
+  if item.IsNew {
+    return "New"
+  }
+  if item.IsUpdated {
+    return "Updated"
+  }
+  if item.IsArchived {
+    return "Archived"
+  }
+  return "Active"
 }
 ```
 
-```typescript
-// UNCLEAR: Chained reduces with inline logic
-const result = items.reduce((acc, item) => ({
-  ...acc,
-  [item.id]: { ...acc[item.id], count: (acc[item.id]?.count ?? 0) + 1 }
-}), {});
-
-// CLEAR: Named intermediate step
-const countById = new Map<string, number>();
-for (const item of items) {
-  countById.set(item.id, (countById.get(item.id) ?? 0) + 1);
+```go
+// UNCLEAR: Too much state packed into one expression.
+// CLEAR: Named intermediate step.
+countByID := make(map[string]int)
+for _, item := range items {
+  countByID[item.ID]++
 }
 ```
 
@@ -186,52 +194,48 @@ If the "simplified" version is harder to understand or review, revert. Not every
 
 ## Language-Specific Guidance
 
-### TypeScript / JavaScript
+### Go
 
-```typescript
-// SIMPLIFY: Unnecessary async wrapper
+```go
+// SIMPLIFY: Unnecessary wrapper.
 // Before
-async function getUser(id: string): Promise<User> {
-  return await userService.findById(id);
+func getUser(ctx context.Context, id string) (User, error) {
+	return userService.FindByID(ctx, id)
 }
 // After
-function getUser(id: string): Promise<User> {
-  return userService.findById(id);
-}
+// Inline the wrapper at the call site if it adds no value.
 
-// SIMPLIFY: Verbose conditional assignment
+// SIMPLIFY: Verbose conditional assignment.
 // Before
-let displayName: string;
-if (user.nickname) {
-  displayName = user.nickname;
-} else {
-  displayName = user.fullName;
+displayName := user.FullName
+if user.Nickname != "" {
+	displayName = user.Nickname
 }
 // After
-const displayName = user.nickname || user.fullName;
+displayName := firstNonEmpty(user.Nickname, user.FullName)
 
-// SIMPLIFY: Manual array building
+// SIMPLIFY: Manual slice building when a helper clarifies intent.
 // Before
-const activeUsers: User[] = [];
-for (const user of users) {
-  if (user.isActive) {
-    activeUsers.push(user);
-  }
+var activeUsers []User
+for _, user := range users {
+	if user.IsActive {
+		activeUsers = append(activeUsers, user)
+	}
 }
 // After
-const activeUsers = users.filter((user) => user.isActive);
+activeUsers := filterActiveUsers(users)
 
-// SIMPLIFY: Redundant boolean return
+// SIMPLIFY: Redundant boolean return.
 // Before
-function isValid(input: string): boolean {
-  if (input.length > 0 && input.length < 100) {
-    return true;
-  }
-  return false;
+func isValid(input string) bool {
+	if len(input) > 0 && len(input) < 100 {
+		return true
+	}
+	return false
 }
 // After
-function isValid(input: string): boolean {
-  return input.length > 0 && input.length < 100;
+func isValid(input string) bool {
+	return len(input) > 0 && len(input) < 100
 }
 ```
 
@@ -270,27 +274,31 @@ def process(data):
     return do_work(data)
 ```
 
-### React / JSX
+### Go HTTP / Templates
 
-```tsx
-// SIMPLIFY: Verbose conditional rendering
+```go
+// SIMPLIFY: Verbose HTTP branching.
 // Before
-function UserBadge({ user }: Props) {
-  if (user.isAdmin) {
-    return <Badge variant="admin">Admin</Badge>;
+func writeUserBadge(w http.ResponseWriter, user User) {
+  if user.IsAdmin {
+    fmt.Fprint(w, `<span class="badge badge-admin">Admin</span>`)
   } else {
-    return <Badge variant="default">User</Badge>;
+    fmt.Fprint(w, `<span class="badge badge-default">User</span>`)
   }
 }
 // After
-function UserBadge({ user }: Props) {
-  const variant = user.isAdmin ? 'admin' : 'default';
-  const label = user.isAdmin ? 'Admin' : 'User';
-  return <Badge variant={variant}>{label}</Badge>;
+func writeUserBadge(w http.ResponseWriter, user User) {
+  variant := "default"
+  label := "User"
+  if user.IsAdmin {
+    variant = "admin"
+    label = "Admin"
+  }
+  fmt.Fprintf(w, `<span class="badge badge-%s">%s</span>`, variant, label)
 }
 
-// SIMPLIFY: Prop drilling through intermediate components
-// Before — consider whether context or composition solves this better.
+// SIMPLIFY: Deeply nested handlers.
+// Before — consider whether middleware or a small helper solves this better.
 // This is a judgment call — flag it, don't auto-refactor.
 ```
 

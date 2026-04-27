@@ -7,7 +7,7 @@ description: Automates CI/CD pipeline setup. Use when setting up or modifying bu
 
 ## Overview
 
-Automate quality gates so that no change reaches production without passing tests, lint, type checking, and build. CI/CD is the enforcement mechanism for every other skill — it catches what humans and agents miss, and it does so consistently on every single change.
+Automate quality gates so that no change reaches production without passing tests, lint, static analysis, and build. CI/CD is the enforcement mechanism for every other skill — it catches what humans and agents miss, and it does so consistently on every single change.
 
 **Shift Left:** Catch problems as early in the pipeline as possible. A bug caught in linting costs minutes; the same bug caught in production costs hours. Move checks upstream — static analysis before tests, tests before staging, staging before production.
 
@@ -30,21 +30,21 @@ Pull Request Opened
     │
     ▼
 ┌─────────────────┐
-│   LINT CHECK     │  eslint, prettier
+│   LINT CHECK     │  golangci-lint, gofmt
 │   ↓ pass         │
-│   TYPE CHECK     │  tsc --noEmit
+│   STATIC ANALYSIS│  go vet
 │   ↓ pass         │
-│   UNIT TESTS     │  jest/vitest
+│   UNIT TESTS     │  go test ./...
 │   ↓ pass         │
-│   BUILD          │  npm run build
+│   BUILD          │  go build ./...
 │   ↓ pass         │
 │   INTEGRATION    │  API/DB tests
 │   ↓ pass         │
-│   E2E (optional) │  Playwright/Cypress
+│   RACE (optional)│  go test -race ./...
 │   ↓ pass         │
-│   SECURITY AUDIT │  npm audit
+│   SECURITY AUDIT │  govulncheck ./...
 │   ↓ pass         │
-│   BUNDLE SIZE    │  bundlesize check
+│   PACKAGING      │  release artifact smoke check
 └─────────────────┘
     │
     ▼
@@ -73,28 +73,28 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-go@v5
         with:
-          node-version: '22'
-          cache: 'npm'
+          go-version-file: go.mod
+          cache: true
 
-      - name: Install dependencies
-        run: npm ci
+      - name: Download dependencies
+        run: go mod download
 
       - name: Lint
-        run: npm run lint
+        run: golangci-lint run
 
-      - name: Type check
-        run: npx tsc --noEmit
+      - name: Static analysis
+        run: go vet ./...
 
       - name: Test
-        run: npm test -- --coverage
+        run: go test ./... -cover
 
       - name: Build
-        run: npm run build
+        run: go build ./...
 
       - name: Security audit
-        run: npm audit --audit-level=high
+        run: govulncheck ./...
 ```
 
 ### With Database Integration Tests
@@ -119,46 +119,44 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-go@v5
         with:
-          node-version: '22'
-          cache: 'npm'
-      - run: npm ci
+          go-version-file: go.mod
+          cache: true
+      - run: go mod download
       - name: Run migrations
-        run: npx prisma migrate deploy
+        run: go run ./cmd/migrate up
         env:
-          DATABASE_URL: postgresql://ci_user:${{ secrets.CI_DB_PASSWORD }}@localhost:5432/testdb
+          DATABASE_URL: postgresql://ci_user:${{ secrets.CI_DB_PASSWORD }}@localhost:5432/testdb?sslmode=disable
       - name: Integration tests
-        run: npm run test:integration
+        run: go test ./... -run Integration
         env:
-          DATABASE_URL: postgresql://ci_user:${{ secrets.CI_DB_PASSWORD }}@localhost:5432/testdb
+          DATABASE_URL: postgresql://ci_user:${{ secrets.CI_DB_PASSWORD }}@localhost:5432/testdb?sslmode=disable
 ```
 
 > **Note:** Even for CI-only test databases, use GitHub Secrets for credentials rather than hardcoding values. This builds good habits and prevents accidental reuse of test credentials in other contexts.
 
-### E2E Tests
+### Race and Smoke Tests
 
 ```yaml
-  e2e:
+  race:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-go@v5
         with:
-          node-version: '22'
-          cache: 'npm'
-      - run: npm ci
-      - name: Install Playwright
-        run: npx playwright install --with-deps chromium
+          go-version-file: go.mod
+          cache: true
+      - run: go mod download
       - name: Build
-        run: npm run build
-      - name: Run E2E tests
-        run: npx playwright test
+        run: go build ./...
+      - name: Run race detector
+        run: go test -race ./...
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
-          name: playwright-report
-          path: playwright-report/
+          name: race-logs
+          path: .
 ```
 
 ## Feeding CI Failures Back to Agents
@@ -184,10 +182,10 @@ Agent fixes → pushes → CI runs again
 **Key patterns:**
 
 ```
-Lint failure → Agent runs `npm run lint --fix` and commits
-Type error  → Agent reads the error location and fixes the type
+Lint failure → Agent runs `golangci-lint run` locally and fixes the reported package
+Static analysis error → Agent reads the `go vet` output and fixes the cited code path
 Test failure → Agent follows debugging-and-error-recovery skill
-Build error → Agent checks config and dependencies
+Build error → Agent checks go.mod, package paths, and build tags
 ```
 
 ## Deployment Strategies
@@ -197,14 +195,19 @@ Build error → Agent checks config and dependencies
 Every PR gets a preview deployment for manual testing:
 
 ```yaml
-# Deploy preview on PR (Vercel/Netlify/etc.)
+# Build a preview artifact on PR
 deploy-preview:
   runs-on: ubuntu-latest
   if: github.event_name == 'pull_request'
   steps:
     - uses: actions/checkout@v4
-    - name: Deploy preview
-      run: npx vercel --token=${{ secrets.VERCEL_TOKEN }}
+    - uses: actions/setup-go@v5
+      with:
+        go-version-file: go.mod
+        cache: true
+    - run: go mod download
+    - name: Build preview binary
+      run: go build -o dist/app-preview ./...
 ```
 
 ### Feature Flags
@@ -216,12 +219,12 @@ Feature flags decouple deployment from release. Deploy incomplete or risky featu
 - **Canary new features.** Enable for 1% of users, then 10%, then 100%.
 - **Run A/B tests.** Compare behavior with and without the feature.
 
-```typescript
-// Simple feature flag pattern
-if (featureFlags.isEnabled('new-checkout-flow', { userId })) {
-  return renderNewCheckout();
+```go
+// Simple feature flag pattern.
+if cfg.Features.NewCheckoutFlow {
+	return renderNewCheckout(ctx, request)
 }
-return renderLegacyCheckout();
+return renderLegacyCheckout(ctx, request)
 ```
 
 **Flag lifecycle:** Create → Enable for testing → Canary → Full rollout → Remove the flag and dead code. Flags that live forever become technical debt — set a cleanup date when you create them.
@@ -265,7 +268,7 @@ jobs:
       - name: Rollback deployment
         run: |
           # Deploy the specified previous version
-          npx vercel rollback ${{ inputs.version }}
+          ./scripts/rollback.sh ${{ inputs.version }}
 ```
 
 ## Environment Management
@@ -288,7 +291,7 @@ CI should never have production secrets. Use separate secrets for CI testing.
 # .github/dependabot.yml
 version: 2
 updates:
-  - package-ecosystem: npm
+  - package-ecosystem: gomod
     directory: /
     schedule:
       interval: weekly
@@ -313,11 +316,11 @@ When the pipeline exceeds 10 minutes, apply these strategies in order of impact:
 ```
 Slow CI pipeline?
 ├── Cache dependencies
-│   └── Use actions/cache or setup-node cache option for node_modules
+│   └── Use setup-go cache or actions/cache for the module and build cache
 ├── Run jobs in parallel
-│   └── Split lint, typecheck, test, build into separate parallel jobs
+│   └── Split lint, vet, test, and build into separate parallel jobs
 ├── Only run what changed
-│   └── Use path filters to skip unrelated jobs (e.g., skip e2e for docs-only PRs)
+│   └── Use path filters to skip unrelated jobs (e.g., skip integration for docs-only PRs)
 ├── Use matrix builds
 │   └── Shard test suites across multiple runners
 ├── Optimize the test suite
@@ -333,28 +336,34 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: { node-version: '22', cache: 'npm' }
-      - run: npm ci
-      - run: npm run lint
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: go mod download
+      - run: golangci-lint run
 
-  typecheck:
+  vet:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: { node-version: '22', cache: 'npm' }
-      - run: npm ci
-      - run: npx tsc --noEmit
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: go mod download
+      - run: go vet ./...
 
   test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: { node-version: '22', cache: 'npm' }
-      - run: npm ci
-      - run: npm test -- --coverage
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: go mod download
+      - run: go test ./... -cover
 ```
 
 ## Common Rationalizations
@@ -381,7 +390,7 @@ jobs:
 
 After setting up or modifying CI:
 
-- [ ] All quality gates are present (lint, types, tests, build, audit)
+- [ ] All quality gates are present (lint, static analysis, tests, build, audit)
 - [ ] Pipeline runs on every PR and push to main
 - [ ] Failures block merge (branch protection configured)
 - [ ] CI results feed back into the development loop

@@ -38,23 +38,14 @@ Avoid forcing consumers to choose between multiple versions of the same dependen
 
 Define the interface before implementing it. The contract is the spec — implementation follows.
 
-```typescript
-// Define the contract first
-interface TaskAPI {
-  // Creates a task and returns the created task with server-generated fields
-  createTask(input: CreateTaskInput): Promise<Task>;
-
-  // Returns paginated tasks matching filters
-  listTasks(params: ListTasksParams): Promise<PaginatedResult<Task>>;
-
-  // Returns a single task or throws NotFoundError
-  getTask(id: string): Promise<Task>;
-
-  // Partial update — only provided fields change
-  updateTask(id: string, input: UpdateTaskInput): Promise<Task>;
-
-  // Idempotent delete — succeeds even if already deleted
-  deleteTask(id: string): Promise<void>;
+```go
+// Define the contract first.
+type TaskService interface {
+	CreateTask(ctx context.Context, input CreateTaskInput) (Task, error)
+	ListTasks(ctx context.Context, params ListTasksParams) (PaginatedResult[Task], error)
+	GetTask(ctx context.Context, id TaskID) (Task, error)
+	UpdateTask(ctx context.Context, id TaskID, input UpdateTaskInput) (Task, error)
+	DeleteTask(ctx context.Context, id TaskID) error
 }
 ```
 
@@ -62,15 +53,16 @@ interface TaskAPI {
 
 Pick one error strategy and use it everywhere:
 
-```typescript
-// REST: HTTP status codes + structured error body
-// Every error response follows the same shape
-interface APIError {
-  error: {
-    code: string;        // Machine-readable: "VALIDATION_ERROR"
-    message: string;     // Human-readable: "Email is required"
-    details?: unknown;   // Additional context when helpful
-  };
+```go
+// REST: HTTP status codes + structured error body.
+type APIError struct {
+	Error ErrorBody `json:"error"`
+}
+
+type ErrorBody struct {
+	Code    string      `json:"code"`
+	Message string      `json:"message"`
+	Details interface{} `json:"details,omitempty"`
 }
 
 // Status code mapping
@@ -89,24 +81,26 @@ interface APIError {
 
 Trust internal code. Validate at system edges where external input enters:
 
-```typescript
-// Validate at the API boundary
-app.post('/api/tasks', async (req, res) => {
-  const result = CreateTaskSchema.safeParse(req.body);
-  if (!result.success) {
-    return res.status(422).json({
-      error: {
-        code: 'VALIDATION_ERROR',
-        message: 'Invalid task data',
-        details: result.error.flatten(),
-      },
-    });
+```go
+// Validate at the API boundary.
+func (handler *TaskHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
+  var input CreateTaskInput
+  if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+    writeJSON(w, http.StatusBadRequest, APIError{Error: ErrorBody{Code: "INVALID_JSON", Message: "Request body must be valid JSON"}})
+    return
+  }
+  if err := input.Validate(); err != nil {
+    writeJSON(w, http.StatusUnprocessableEntity, APIError{Error: ErrorBody{Code: "VALIDATION_ERROR", Message: "Invalid task data", Details: err.Error()}})
+    return
   }
 
-  // After validation, internal code trusts the types
-  const task = await taskService.create(result.data);
-  return res.status(201).json(task);
-});
+  task, err := handler.service.CreateTask(r.Context(), input)
+  if err != nil {
+    handler.writeServiceError(w, err)
+    return
+  }
+  writeJSON(w, http.StatusCreated, task)
+}
 ```
 
 Where validation belongs:
@@ -126,20 +120,19 @@ Where validation does NOT belong:
 
 Extend interfaces without breaking existing consumers:
 
-```typescript
-// Good: Add optional fields
-interface CreateTaskInput {
-  title: string;
-  description?: string;
-  priority?: 'low' | 'medium' | 'high';  // Added later, optional
-  labels?: string[];                       // Added later, optional
+```go
+// Good: Add optional fields.
+type CreateTaskInput struct {
+	Title       string   `json:"title"`
+	Description *string  `json:"description,omitempty"`
+	Priority    *string  `json:"priority,omitempty"`
+	Labels      []string `json:"labels,omitempty"`
 }
 
-// Bad: Change existing field types or remove fields
-interface CreateTaskInput {
-  title: string;
-  // description: string;  // Removed — breaks existing consumers
-  priority: number;         // Changed from string — breaks existing consumers
+// Bad: Change existing field types or remove fields.
+type BreakingCreateTaskInput struct {
+	Title    string `json:"title"`
+	Priority int    `json:"priority"`
 }
 ```
 
@@ -172,7 +165,7 @@ POST   /api/tasks/:id/comments → Add a comment to a task
 
 Paginate list endpoints:
 
-```typescript
+```json
 // Request
 GET /api/tasks?page=1&pageSize=20&sortBy=createdAt&sortOrder=desc
 
@@ -200,63 +193,70 @@ GET /api/tasks?status=in_progress&assignee=user123&createdAfter=2025-01-01
 
 Accept partial objects — only update what's provided:
 
-```typescript
+```json
 // Only title changes, everything else preserved
 PATCH /api/tasks/123
 { "title": "Updated title" }
 ```
 
-## TypeScript Interface Patterns
+## Go Interface Patterns
 
-### Use Discriminated Unions for Variants
+### Represent Variants Explicitly
 
-```typescript
-// Good: Each variant is explicit
-type TaskStatus =
-  | { type: 'pending' }
-  | { type: 'in_progress'; assignee: string; startedAt: Date }
-  | { type: 'completed'; completedAt: Date; completedBy: string }
-  | { type: 'cancelled'; reason: string; cancelledAt: Date };
+```go
+type TaskStatus string
 
-// Consumer gets type narrowing
-function getStatusLabel(status: TaskStatus): string {
-  switch (status.type) {
-    case 'pending': return 'Pending';
-    case 'in_progress': return `In progress (${status.assignee})`;
-    case 'completed': return `Done on ${status.completedAt}`;
-    case 'cancelled': return `Cancelled: ${status.reason}`;
+const (
+  StatusPending    TaskStatus = "pending"
+  StatusInProgress TaskStatus = "in_progress"
+  StatusCompleted  TaskStatus = "completed"
+  StatusCancelled  TaskStatus = "cancelled"
+)
+
+func getStatusLabel(status TaskStatus, assignee string, completedAt time.Time, reason string) string {
+  switch status {
+  case StatusPending:
+    return "Pending"
+  case StatusInProgress:
+    return fmt.Sprintf("In progress (%s)", assignee)
+  case StatusCompleted:
+    return fmt.Sprintf("Done on %s", completedAt.Format(time.RFC3339))
+  case StatusCancelled:
+    return fmt.Sprintf("Cancelled: %s", reason)
+  default:
+    return "Unknown"
   }
 }
 ```
 
 ### Input/Output Separation
 
-```typescript
-// Input: what the caller provides
-interface CreateTaskInput {
-  title: string;
-  description?: string;
+```go
+// Input: what the caller provides.
+type CreateTaskInput struct {
+	Title       string  `json:"title"`
+	Description *string `json:"description,omitempty"`
 }
 
-// Output: what the system returns (includes server-generated fields)
-interface Task {
-  id: string;
-  title: string;
-  description: string | null;
-  createdAt: Date;
-  updatedAt: Date;
-  createdBy: string;
+// Output: what the system returns.
+type Task struct {
+	ID          TaskID    `json:"id"`
+	Title       string    `json:"title"`
+	Description *string   `json:"description,omitempty"`
+	CreatedAt   time.Time `json:"createdAt"`
+	UpdatedAt   time.Time `json:"updatedAt"`
+	CreatedBy   UserID    `json:"createdBy"`
 }
 ```
 
-### Use Branded Types for IDs
+### Use Distinct ID Types
 
-```typescript
-type TaskId = string & { readonly __brand: 'TaskId' };
-type UserId = string & { readonly __brand: 'UserId' };
+```go
+type TaskID string
+type UserID string
 
-// Prevents accidentally passing a UserId where a TaskId is expected
-function getTask(id: TaskId): Promise<Task> { ... }
+// Prevents accidentally passing a UserID where a TaskID is expected.
+func getTask(ctx context.Context, id TaskID) (Task, error) { return Task{}, nil }
 ```
 
 ## Common Rationalizations

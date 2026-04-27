@@ -135,16 +135,19 @@ Phase 5: Remove old system
 
 Create an adapter that translates calls from the old interface to the new implementation. Consumers keep using the old interface while you migrate the backend.
 
-```typescript
-// Adapter: old interface, new implementation
-class LegacyTaskService implements OldTaskAPI {
-  constructor(private newService: NewTaskService) {}
+```go
+// Adapter: old interface, new implementation.
+type LegacyTaskService struct {
+	newService *NewTaskService
+}
 
-  // Old method signature, delegates to new implementation
-  getTask(id: number): OldTask {
-    const task = this.newService.findById(String(id));
-    return this.toOldFormat(task);
-  }
+// Old method signature, delegates to new implementation.
+func (service *LegacyTaskService) GetTask(id int64) (OldTask, error) {
+	task, err := service.newService.FindByID(strconv.FormatInt(id, 10))
+	if err != nil {
+		return OldTask{}, err
+	}
+	return toOldFormat(task), nil
 }
 ```
 
@@ -152,12 +155,12 @@ class LegacyTaskService implements OldTaskAPI {
 
 Use feature flags to switch consumers from old to new system one at a time:
 
-```typescript
-function getTaskService(userId: string): TaskService {
-  if (featureFlags.isEnabled('new-task-service', { userId })) {
-    return new NewTaskService();
-  }
-  return new LegacyTaskService();
+```go
+func getTaskService(userID string) TaskService {
+	if featureFlags.Enabled("new-task-service", userID) {
+		return newTaskService()
+	}
+	return newLegacyTaskService()
 }
 ```
 

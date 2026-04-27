@@ -39,10 +39,10 @@ Start with a high-level vision. Ask the human clarifying questions until require
 
 ```
 ASSUMPTIONS I'M MAKING:
-1. This is a web application (not native mobile)
-2. Authentication uses session-based cookies (not JWT)
-3. The database is PostgreSQL (based on existing Prisma schema)
-4. We're targeting modern browsers only (no IE11)
+1. This is a Go service or CLI, not a browser-first application
+2. Configuration is loaded from files and environment variables
+3. Long-running operations accept context cancellation
+4. We are building against the module versions pinned in go.mod
 → Correct me now or I'll proceed with these.
 ```
 
@@ -54,20 +54,19 @@ Don't silently fill in ambiguous requirements. The spec's entire purpose is to s
 
 2. **Commands** — Full executable commands with flags, not just tool names.
    ```
-   Build: npm run build
-   Test: npm test -- --coverage
-   Lint: npm run lint --fix
-   Dev: npm run dev
+   Build: go build ./...
+   Test: go test ./...
+   Lint: golangci-lint run
+   Run: go run .
    ```
 
 3. **Project Structure** — Where source code lives, where tests go, where docs belong.
    ```
-   src/           → Application source code
-   src/components → React components
-   src/lib        → Shared utilities
-   tests/         → Unit and integration tests
-   e2e/           → End-to-end tests
-   docs/          → Documentation
+   cmd/           → CLI entrypoints and command wiring
+   internal/      → Internal application packages
+   pkg/           → Reusable public packages (only when truly public)
+   testdata/      → Fixtures used by tests
+   docs/          → Specifications, ADRs, operational notes
    ```
 
 4. **Code Style** — One real code snippet showing your style beats three paragraphs describing it. Include naming conventions, formatting rules, and examples of good output.
@@ -91,7 +90,7 @@ Don't silently fill in ambiguous requirements. The spec's entire purpose is to s
 [Framework, language, key dependencies with versions]
 
 ## Commands
-[Build, test, lint, dev — full commands]
+[Build, test, lint, run — full commands]
 
 ## Project Structure
 [Directory layout with descriptions]
@@ -120,9 +119,9 @@ Don't silently fill in ambiguous requirements. The spec's entire purpose is to s
 REQUIREMENT: "Make the dashboard faster"
 
 REFRAMED SUCCESS CRITERIA:
-- Dashboard LCP < 2.5s on 4G connection
-- Initial data load completes in < 500ms
-- No layout shift during load (CLS < 0.1)
+- Config loads in < 50ms for the default file
+- Startup fails fast with actionable errors on invalid config
+- `go test ./...` and `go build ./...` stay green after the change
 → Are these the right targets?
 ```
 

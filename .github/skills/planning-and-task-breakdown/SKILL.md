@@ -90,15 +90,15 @@ Each task follows this structure:
 - [ ] [Specific, testable condition]
 
 **Verification:**
-- [ ] Tests pass: `npm test -- --grep "feature-name"`
-- [ ] Build succeeds: `npm run build`
+- [ ] Tests pass: `go test ./... -run '^TestFeatureName$'`
+- [ ] Build succeeds: `go build ./...`
 - [ ] Manual check: [description of what to verify]
 
 **Dependencies:** [Task numbers this depends on, or "None"]
 
 **Files likely touched:**
-- `src/path/to/file.ts`
-- `tests/path/to/test.ts`
+- `internal/path/to/file.go`
+- `internal/path/to/file_test.go`
 
 **Estimated scope:** [Small: 1-2 files | Medium: 3-5 files | Large: 5+ files]
 ```

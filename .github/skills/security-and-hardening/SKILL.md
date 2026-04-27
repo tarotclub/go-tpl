@@ -29,7 +29,7 @@ Security-first development practices for web applications. Treat every external 
 - **Hash passwords** with bcrypt/scrypt/argon2 (never store plaintext)
 - **Set security headers** (CSP, HSTS, X-Frame-Options, X-Content-Type-Options)
 - **Use httpOnly, secure, sameSite cookies** for sessions
-- **Run `npm audit`** (or equivalent) before every release
+- **Run `govulncheck ./...`** (or equivalent) before every release
 
 ### Ask First (Requires Human Approval)
 
@@ -55,170 +55,175 @@ Security-first development practices for web applications. Treat every external 
 
 ### 1. Injection (SQL, NoSQL, OS Command)
 
-```typescript
-// BAD: SQL injection via string concatenation
-const query = `SELECT * FROM users WHERE id = '${userId}'`;
+```go
+// BAD: SQL injection via string concatenation.
+query := "SELECT * FROM users WHERE id = '" + userID + "'"
 
-// GOOD: Parameterized query
-const user = await db.query('SELECT * FROM users WHERE id = $1', [userId]);
+// GOOD: Parameterized query.
+row := db.QueryRowContext(ctx, "SELECT id, email FROM users WHERE id = $1", userID)
 
-// GOOD: ORM with parameterized input
-const user = await prisma.user.findUnique({ where: { id: userId } });
+// GOOD: Prepared statement for repeated calls.
+stmt, err := db.PrepareContext(ctx, "SELECT id, email FROM users WHERE id = $1")
 ```
 
 ### 2. Broken Authentication
 
-```typescript
-// Password hashing
-import { hash, compare } from 'bcrypt';
+```go
+// Password hashing.
+hash, err := bcrypt.GenerateFromPassword([]byte(plaintext), bcrypt.DefaultCost)
+if err != nil {
+	return err
+}
+if err := bcrypt.CompareHashAndPassword(hash, []byte(plaintext)); err != nil {
+	return err
+}
 
-const SALT_ROUNDS = 12;
-const hashedPassword = await hash(plaintext, SALT_ROUNDS);
-const isValid = await compare(plaintext, hashedPassword);
-
-// Session management
-app.use(session({
-  secret: process.env.SESSION_SECRET,  // From environment, not code
-  resave: false,
-  saveUninitialized: false,
-  cookie: {
-    httpOnly: true,     // Not accessible via JavaScript
-    secure: true,       // HTTPS only
-    sameSite: 'lax',    // CSRF protection
-    maxAge: 24 * 60 * 60 * 1000,  // 24 hours
-  },
-}));
+// Session cookie management.
+http.SetCookie(w, &http.Cookie{
+	Name:     "session",
+	Value:    sessionToken,
+	HttpOnly: true,
+	Secure:   true,
+	SameSite: http.SameSiteLaxMode,
+	MaxAge:   24 * 60 * 60,
+	Path:     "/",
+})
 ```
 
 ### 3. Cross-Site Scripting (XSS)
 
-```typescript
-// BAD: Rendering user input as HTML
-element.innerHTML = userInput;
+```go
+// BAD: Writing untrusted HTML directly to the response.
+fmt.Fprintf(w, userInput)
 
-// GOOD: Use framework auto-escaping (React does this by default)
-return <div>{userInput}</div>;
+// GOOD: Use html/template auto-escaping.
+tmpl.Execute(w, struct{ Message string }{Message: userInput})
 
-// If you MUST render HTML, sanitize first
-import DOMPurify from 'dompurify';
-const clean = DOMPurify.sanitize(userInput);
+// If you must allow rich HTML, sanitize first with a reviewed sanitizer.
+policy := bluemonday.UGCPolicy()
+clean := policy.Sanitize(userInput)
 ```
 
 ### 4. Broken Access Control
 
-```typescript
-// Always check authorization, not just authentication
-app.patch('/api/tasks/:id', authenticate, async (req, res) => {
-  const task = await taskService.findById(req.params.id);
-
-  // Check that the authenticated user owns this resource
-  if (task.ownerId !== req.user.id) {
-    return res.status(403).json({
-      error: { code: 'FORBIDDEN', message: 'Not authorized to modify this task' }
-    });
+```go
+// Always check authorization, not just authentication.
+func (handler *TaskHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
+  user := auth.UserFromContext(r.Context())
+  task, err := handler.service.GetTask(r.Context(), TaskID(chi.URLParam(r, "id")))
+  if err != nil {
+    handler.writeServiceError(w, err)
+    return
   }
-
-  // Proceed with update
-  const updated = await taskService.update(req.params.id, req.body);
-  return res.json(updated);
-});
+  if task.OwnerID != user.ID {
+    writeJSON(w, http.StatusForbidden, APIError{Error: ErrorBody{Code: "FORBIDDEN", Message: "Not authorized to modify this task"}})
+    return
+  }
+  // Proceed with update.
+}
 ```
 
 ### 5. Security Misconfiguration
 
-```typescript
-// Security headers (use helmet for Express)
-import helmet from 'helmet';
-app.use(helmet());
+```go
+// Security headers.
+func securityHeaders(next http.Handler) http.Handler {
+  return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+    w.Header().Set("X-Content-Type-Options", "nosniff")
+    w.Header().Set("X-Frame-Options", "DENY")
+    w.Header().Set("Content-Security-Policy", "default-src 'self'")
+    w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+    next.ServeHTTP(w, r)
+  })
+}
 
-// Content Security Policy
-app.use(helmet.contentSecurityPolicy({
-  directives: {
-    defaultSrc: ["'self'"],
-    scriptSrc: ["'self'"],
-    styleSrc: ["'self'", "'unsafe-inline'"],  // Tighten if possible
-    imgSrc: ["'self'", 'data:', 'https:'],
-    connectSrc: ["'self'"],
-  },
-}));
-
-// CORS — restrict to known origins
-app.use(cors({
-  origin: process.env.ALLOWED_ORIGINS?.split(',') || 'http://localhost:3000',
-  credentials: true,
-}));
+// CORS — restrict to known origins.
+handler := cors.Handler(cors.Options{
+  AllowedOrigins: []string{"https://app.example.com"},
+  AllowedMethods: []string{"GET", "POST", "PATCH", "DELETE"},
+  AllowCredentials: true,
+})(router)
 ```
 
 ### 6. Sensitive Data Exposure
 
-```typescript
-// Never return sensitive fields in API responses
-function sanitizeUser(user: UserRecord): PublicUser {
-  const { passwordHash, resetToken, ...publicFields } = user;
-  return publicFields;
+```go
+// Never return sensitive fields in API responses.
+func sanitizeUser(user UserRecord) PublicUser {
+  return PublicUser{
+    ID:    user.ID,
+    Email: user.Email,
+    Name:  user.Name,
+  }
 }
 
-// Use environment variables for secrets
-const API_KEY = process.env.STRIPE_API_KEY;
-if (!API_KEY) throw new Error('STRIPE_API_KEY not configured');
+// Use environment variables for secrets.
+apiKey := os.Getenv("STRIPE_API_KEY")
+if apiKey == "" {
+  return errors.New("STRIPE_API_KEY not configured")
+}
 ```
 
 ## Input Validation Patterns
 
 ### Schema Validation at Boundaries
 
-```typescript
-import { z } from 'zod';
+```go
+type CreateTaskInput struct {
+  Title       string     `json:"title"`
+  Description *string    `json:"description,omitempty"`
+  Priority    string     `json:"priority,omitempty"`
+  DueDate     *time.Time `json:"dueDate,omitempty"`
+}
 
-const CreateTaskSchema = z.object({
-  title: z.string().min(1).max(200).trim(),
-  description: z.string().max(2000).optional(),
-  priority: z.enum(['low', 'medium', 'high']).default('medium'),
-  dueDate: z.string().datetime().optional(),
-});
-
-// Validate at the route handler
-app.post('/api/tasks', async (req, res) => {
-  const result = CreateTaskSchema.safeParse(req.body);
-  if (!result.success) {
-    return res.status(422).json({
-      error: {
-        code: 'VALIDATION_ERROR',
-        message: 'Invalid input',
-        details: result.error.flatten(),
-      },
-    });
+func (input CreateTaskInput) Validate() error {
+  if strings.TrimSpace(input.Title) == "" {
+    return errors.New("title is required")
   }
-  // result.data is now typed and validated
-  const task = await taskService.create(result.data);
-  return res.status(201).json(task);
-});
+  if len(input.Title) > 200 {
+    return errors.New("title must be 200 characters or fewer")
+  }
+  return nil
+}
+
+// Validate at the route handler.
+func (handler *TaskHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
+  var input CreateTaskInput
+  if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+    writeJSON(w, http.StatusBadRequest, APIError{Error: ErrorBody{Code: "INVALID_JSON", Message: "Invalid input"}})
+    return
+  }
+  if err := input.Validate(); err != nil {
+    writeJSON(w, http.StatusUnprocessableEntity, APIError{Error: ErrorBody{Code: "VALIDATION_ERROR", Message: err.Error()}})
+    return
+  }
+}
 ```
 
 ### File Upload Safety
 
-```typescript
-// Restrict file types and sizes
-const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
-const MAX_SIZE = 5 * 1024 * 1024; // 5MB
+```go
+// Restrict file types and sizes.
+var allowedTypes = map[string]struct{}{"image/jpeg": {}, "image/png": {}, "image/webp": {}}
+const maxSize = 5 * 1024 * 1024 // 5MB
 
-function validateUpload(file: UploadedFile) {
-  if (!ALLOWED_TYPES.includes(file.mimetype)) {
-    throw new ValidationError('File type not allowed');
-  }
-  if (file.size > MAX_SIZE) {
-    throw new ValidationError('File too large (max 5MB)');
-  }
-  // Don't trust the file extension — check magic bytes if critical
+func validateUpload(file multipart.File, header *multipart.FileHeader) error {
+	if _, ok := allowedTypes[header.Header.Get("Content-Type")]; !ok {
+		return errors.New("file type not allowed")
+	}
+	if header.Size > maxSize {
+		return errors.New("file too large (max 5MB)")
+	}
+	return nil
 }
 ```
 
-## Triaging npm audit Results
+## Triaging govulncheck Results
 
 Not all audit findings require immediate action. Use this decision tree:
 
 ```
-npm audit reports a vulnerability
+govulncheck reports a vulnerability
 ├── Severity: critical or high
 │   ├── Is the vulnerable code reachable in your app?
 │   │   ├── YES --> Fix immediately (update, patch, or replace the dependency)
@@ -242,22 +247,18 @@ When you defer a fix, document the reason and set a review date.
 
 ## Rate Limiting
 
-```typescript
-import rateLimit from 'express-rate-limit';
+```go
+// General API rate limit.
+apiLimiter := httprate.LimitByIP(100, 15*time.Minute)
+router.With(apiLimiter).Route("/api", func(r chi.Router) {
+	// ...
+})
 
-// General API rate limit
-app.use('/api/', rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100,                   // 100 requests per window
-  standardHeaders: true,
-  legacyHeaders: false,
-}));
-
-// Stricter limit for auth endpoints
-app.use('/api/auth/', rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 10,  // 10 attempts per 15 minutes
-}));
+// Stricter limit for auth endpoints.
+authLimiter := httprate.LimitByIP(10, 15*time.Minute)
+router.With(authLimiter).Route("/api/auth", func(r chi.Router) {
+	// ...
+})
 ```
 
 ## Secrets Management
@@ -340,7 +341,7 @@ For detailed security checklists and pre-commit verification steps, see `referen
 
 After implementing security-relevant code:
 
-- [ ] `npm audit` shows no critical or high vulnerabilities
+- [ ] `govulncheck ./...` shows no critical or high vulnerabilities
 - [ ] No secrets in source code or git history
 - [ ] All user input validated at system boundaries
 - [ ] Authentication and authorization checked on every protected endpoint

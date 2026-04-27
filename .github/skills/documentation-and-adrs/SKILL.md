@@ -54,7 +54,7 @@ We need a primary database for the task management application. Key requirements
 - Managed hosting available (for small team, limited ops capacity)
 
 ## Decision
-Use PostgreSQL with Prisma ORM.
+Use PostgreSQL with pgx and goose migrations.
 
 ## Alternatives Considered
 
@@ -74,7 +74,7 @@ Use PostgreSQL with Prisma ORM.
 - Rejected: PostgreSQL is the better fit for our feature requirements
 
 ## Consequences
-- Prisma provides type-safe database access and migration management
+- pgx provides explicit SQL control and good PostgreSQL performance
 - We can use PostgreSQL's full-text search instead of adding Elasticsearch
 - Team needs PostgreSQL knowledge (standard skill, low risk)
 - Hosting on managed service (Supabase, Neon, or RDS)
@@ -95,7 +95,7 @@ PROPOSED → ACCEPTED → (SUPERSEDED or DEPRECATED)
 
 Comment the *why*, not the *what*:
 
-```typescript
+```go
 // BAD: Restates the code
 // Increment counter by 1
 counter += 1;
@@ -111,10 +111,14 @@ if (now - windowStart > WINDOW_SIZE_MS) {
 
 ### When NOT to Comment
 
-```typescript
+```go
 // Don't comment self-explanatory code
-function calculateTotal(items: CartItem[]): number {
-  return items.reduce((sum, item) => sum + item.price * item.quantity, 0);
+func calculateTotal(items []CartItem) int64 {
+  var total int64
+  for _, item := range items {
+    total += item.Price * int64(item.Quantity)
+  }
+  return total
 }
 
 // Don't leave TODO comments for things you should just do now
@@ -126,7 +130,7 @@ function calculateTotal(items: CartItem[]): number {
 
 ### Document Known Gotchas
 
-```typescript
+```go
 /**
  * IMPORTANT: This function must be called before the first render.
  * If called after hydration, it causes a flash of unstyled content
@@ -143,23 +147,15 @@ export function initializeTheme(theme: Theme): void {
 
 For public APIs (REST, GraphQL, library interfaces):
 
-### Inline with Types (Preferred for TypeScript)
+### Inline with GoDoc Comments
 
-```typescript
-/**
- * Creates a new task.
- *
- * @param input - Task creation data (title required, description optional)
- * @returns The created task with server-generated ID and timestamps
- * @throws {ValidationError} If title is empty or exceeds 200 characters
- * @throws {AuthenticationError} If the user is not authenticated
- *
- * @example
- * const task = await createTask({ title: 'Buy groceries' });
- * console.log(task.id); // "task_abc123"
- */
-export async function createTask(input: CreateTaskInput): Promise<Task> {
-  // ...
+```go
+// CreateTask stores a new task with server-generated metadata.
+//
+// It returns ErrValidation when the title is empty or exceeds 200 characters.
+// It returns ErrUnauthorized when the caller is not allowed to create tasks.
+func (service *TaskService) CreateTask(ctx context.Context, input CreateTaskInput) (Task, error) {
+	// ...
 }
 ```
 
@@ -198,17 +194,17 @@ One-paragraph description of what this project does.
 
 ## Quick Start
 1. Clone the repo
-2. Install dependencies: `npm install`
+2. Download dependencies: `go mod download`
 3. Set up environment: `cp .env.example .env`
-4. Run the dev server: `npm run dev`
+4. Run the application: `go run .`
 
 ## Commands
 | Command | Description |
 |---------|-------------|
-| `npm run dev` | Start development server |
-| `npm test` | Run tests |
-| `npm run build` | Production build |
-| `npm run lint` | Run linter |
+| `go run .` | Start the application |
+| `go test ./...` | Run tests |
+| `go build ./...` | Build all packages |
+| `golangci-lint run` | Run linter |
 
 ## Architecture
 Brief overview of the project structure and key design decisions.

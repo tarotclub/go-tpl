@@ -40,10 +40,9 @@ DETECT ──→ FETCH ──→ IMPLEMENT ──→ CITE
 Read the project's dependency file to identify exact versions:
 
 ```
-package.json    → Node/React/Vue/Angular/Svelte
+go.mod          → Go modules and dependency versions
 composer.json   → PHP/Symfony/Laravel
 requirements.txt / pyproject.toml → Python/Django/Flask
-go.mod          → Go
 Cargo.toml      → Rust
 Gemfile         → Ruby/Rails
 ```
@@ -52,9 +51,9 @@ State what you found explicitly:
 
 ```
 STACK DETECTED:
-- React 19.1.0 (from package.json)
-- Vite 6.2.0
-- Tailwind CSS 4.0.3
+- Go 1.24.1 (from go.mod toolchain)
+- cobra v1.9.1
+- spf13/viper v1.20.1
 → Fetching official docs for the relevant patterns.
 ```
 
@@ -68,10 +67,10 @@ Fetch the specific documentation page for the feature you're implementing. Not t
 
 | Priority | Source | Example |
 |----------|--------|---------|
-| 1 | Official documentation | react.dev, docs.djangoproject.com, symfony.com/doc |
-| 2 | Official blog / changelog | react.dev/blog, nextjs.org/blog |
-| 3 | Web standards references | MDN, web.dev, html.spec.whatwg.org |
-| 4 | Browser/runtime compatibility | caniuse.com, node.green |
+| 1 | Official documentation | go.dev, pkg.go.dev, docs.djangoproject.com |
+| 2 | Official blog / changelog | go.dev/blog, library release notes |
+| 3 | Standards or platform references | RFCs, POSIX, database vendor docs |
+| 4 | Runtime compatibility | Go release notes, supported OS/arch matrix |
 
 **Not authoritative — never cite as primary sources:**
 
@@ -83,8 +82,8 @@ Fetch the specific documentation page for the feature you're implementing. Not t
 **Be precise with what you fetch:**
 
 ```
-BAD:  Fetch the React homepage
-GOOD: Fetch react.dev/reference/react/useActionState
+BAD:  Fetch the Go homepage
+GOOD: Fetch pkg.go.dev/github.com/spf13/cobra#Command.ExecuteContext
 
 BAD:  Search "django authentication best practices"
 GOOD: Fetch docs.djangoproject.com/en/6.0/topics/auth/
@@ -107,13 +106,13 @@ Write code that matches what the documentation shows:
 
 ```
 CONFLICT DETECTED:
-The existing codebase uses useState for form loading state,
-but React 19 docs recommend useActionState for this pattern.
-(Source: react.dev/reference/react/useActionState)
+The existing codebase uses a package-level global config,
+but the current viper docs recommend binding config through an explicit instance.
+(Source: https://pkg.go.dev/github.com/spf13/viper)
 
 Options:
-A) Use the modern pattern (useActionState) — consistent with current docs
-B) Match existing code (useState) — consistent with codebase
+A) Use the documented instance-based pattern — consistent with current docs
+B) Match existing code — consistent with the codebase
 → Which approach do you prefer?
 ```
 
@@ -125,28 +124,28 @@ Every framework-specific pattern gets a citation. The user must be able to verif
 
 **In code comments:**
 
-```typescript
-// React 19 form handling with useActionState
-// Source: https://react.dev/reference/react/useActionState#usage
-const [state, formAction, isPending] = useActionState(submitOrder, initialState);
+```go
+// Cobra supports context-aware execution via ExecuteContext.
+// Source: https://pkg.go.dev/github.com/spf13/cobra#Command.ExecuteContext
+if err := rootCmd.ExecuteContext(ctx); err != nil {
+  return fmt.Errorf("execute root command: %w", err)
+}
 ```
 
 **In conversation:**
 
 ```
-I'm using useActionState instead of manual useState for the
-form submission state. React 19 replaced the manual
-isPending/setIsPending pattern with this hook.
+I'm using ExecuteContext instead of Execute so cancellation from the
+caller propagates through the command tree.
 
-Source: https://react.dev/blog/2024/12/05/react-19#actions
-"useTransition now supports async functions [...] to handle
-pending states automatically"
+Source: https://pkg.go.dev/github.com/spf13/cobra#Command.ExecuteContext
+"ExecuteContext is the same as Execute(), but sets the ctx on the command."
 ```
 
 **Citation rules:**
 
 - Full URLs, not shortened
-- Prefer deep links with anchors where possible (e.g. `/useActionState#usage` over `/useActionState`) — anchors survive doc restructuring better than top-level pages
+- Prefer deep links with anchors where possible (e.g. `/cobra#Command.ExecuteContext` over `/cobra`) — anchors survive doc restructuring better than top-level pages
 - Quote the relevant passage when it supports a non-obvious decision
 - Include browser/runtime support data when recommending platform features
 - If you cannot find documentation for a pattern, say so explicitly:
@@ -176,7 +175,7 @@ Honesty about what you couldn't verify is more valuable than false confidence.
 - Implementing a pattern without knowing which version it applies to
 - Citing Stack Overflow or blog posts instead of official documentation
 - Using deprecated APIs because they appear in training data
-- Not reading `package.json` / dependency files before implementing
+- Not reading `go.mod` / dependency files before implementing
 - Delivering code without source citations for framework-specific decisions
 - Fetching an entire docs site when only one page is relevant
 

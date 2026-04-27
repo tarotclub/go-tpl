@@ -56,10 +56,10 @@ Can you reproduce the failure?
 Cannot reproduce on demand:
 ├── Timing-dependent?
 │   ├── Add timestamps to logs around the suspected area
-│   ├── Try with artificial delays (setTimeout, sleep) to widen race windows
+│   ├── Try with artificial delays or controlled goroutine scheduling to widen race windows
 │   └── Run under load or concurrency to increase collision probability
 ├── Environment-dependent?
-│   ├── Compare Node/browser versions, OS, environment variables
+│   ├── Compare Go version, OS, architecture, and environment variables
 │   ├── Check for differences in data (empty vs populated database)
 │   └── Try reproducing in CI where the environment is clean
 ├── State-dependent?
@@ -75,13 +75,16 @@ Cannot reproduce on demand:
 For test failures:
 ```bash
 # Run the specific failing test
-npm test -- --grep "test name"
+go test ./... -run '^TestName$'
 
 # Run with verbose output
-npm test -- --verbose
+go test ./... -run '^TestName$' -v
 
 # Run in isolation (rules out test pollution)
-npm test -- --testPathPattern="specific-file" --runInBand
+go test ./internal/config -run '^TestName$' -count=1
+
+# Run race detection when concurrency is involved
+go test ./... -race
 ```
 
 ### Step 2: Localize
@@ -105,7 +108,7 @@ git bisect start
 git bisect bad                    # Current commit is broken
 git bisect good <known-good-sha> # This commit worked
 # Git will checkout midpoint commits; run your test at each
-git bisect run npm test -- --grep "failing test"
+git bisect run go test ./... -run '^TestName$'
 ```
 
 ### Step 3: Reduce
@@ -139,14 +142,26 @@ Ask: "Why does this happen?" until you reach the actual cause, not just where it
 
 Write a test that catches this specific failure:
 
-```typescript
-// The bug: task titles with special characters broke the search
-it('finds tasks with special characters in title', async () => {
-  await createTask({ title: 'Fix "quotes" & <brackets>' });
-  const results = await searchTasks('quotes');
-  expect(results).toHaveLength(1);
-  expect(results[0].title).toBe('Fix "quotes" & <brackets>');
-});
+```go
+func TestSearchTasksHandlesSpecialCharacters(t *testing.T) {
+  t.Parallel()
+
+  repo := newInMemoryTaskRepo()
+  if err := repo.Insert(context.Background(), Task{Title: "Fix \"quotes\" & <brackets>"}); err != nil {
+    t.Fatalf("Insert returned error: %v", err)
+  }
+
+  results, err := repo.Search(context.Background(), "quotes")
+  if err != nil {
+    t.Fatalf("Search returned error: %v", err)
+  }
+  if len(results) != 1 {
+    t.Fatalf("expected 1 result, got %d", len(results))
+  }
+  if results[0].Title != "Fix \"quotes\" & <brackets>" {
+    t.Fatalf("unexpected title %q", results[0].Title)
+  }
+}
 ```
 
 This test will prevent the same bug from recurring. It should fail without the fix and pass with it.
@@ -157,16 +172,16 @@ After fixing, verify the complete scenario:
 
 ```bash
 # Run the specific test
-npm test -- --grep "specific test"
+go test ./... -run '^TestName$'
 
 # Run the full test suite (check for regressions)
-npm test
+go test ./...
 
-# Build the project (check for type/compilation errors)
-npm run build
+# Build the project
+go build ./...
 
 # Manual spot check if applicable
-npm run dev  # Verify in browser
+go run .     # Verify the CLI or service starts cleanly
 ```
 
 ## Error-Specific Patterns
@@ -189,11 +204,11 @@ Test fails after code change:
 
 ```
 Build fails:
-├── Type error → Read the error, check the types at the cited location
-├── Import error → Check the module exists, exports match, paths are correct
+├── Compile error → Read the error, check the cited package and identifiers
+├── Import error → Check the module path exists and package names match
 ├── Config error → Check build config files for syntax/schema issues
-├── Dependency error → Check package.json, run npm install
-└── Environment error → Check Node version, OS compatibility
+├── Dependency error → Check go.mod, run go mod tidy or go mod download
+└── Environment error → Check Go version, OS compatibility, CGO/toolchain assumptions
 ```
 
 ### Runtime Error Triage
@@ -215,28 +230,26 @@ Runtime error:
 
 When under time pressure, use safe fallbacks:
 
-```typescript
-// Safe default + warning (instead of crashing)
-function getConfig(key: string): string {
-  const value = process.env[key];
-  if (!value) {
-    console.warn(`Missing config: ${key}, using default`);
-    return DEFAULTS[key] ?? '';
-  }
-  return value;
+```go
+// Safe default + warning (instead of crashing).
+func GetConfig(env map[string]string, key string) string {
+	if value, ok := env[key]; ok && value != "" {
+		return value
+	}
+	log.Printf("missing config %q, using default", key)
+	return defaultConfig[key]
 }
 
-// Graceful degradation (instead of broken feature)
-function renderChart(data: ChartData[]) {
-  if (data.length === 0) {
-    return <EmptyState message="No data available for this period" />;
-  }
-  try {
-    return <Chart data={data} />;
-  } catch (error) {
-    console.error('Chart render failed:', error);
-    return <ErrorState message="Unable to display chart" />;
-  }
+// Graceful degradation (instead of a hard failure).
+func LoadReport(ctx context.Context, store ReportStore, id string) (Report, error) {
+	report, err := store.Load(ctx, id)
+	if err == nil {
+		return report, nil
+	}
+	if errors.Is(err, ErrReportNotFound) {
+		return Report{ID: id, Status: "empty"}, nil
+	}
+	return Report{}, fmt.Errorf("load report %s: %w", id, err)
 }
 ```
 

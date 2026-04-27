@@ -23,7 +23,7 @@ Ship with confidence. The goal is not just to deploy — it's to deploy safely, 
 
 - [ ] All tests pass (unit, integration, e2e)
 - [ ] Build succeeds with no warnings
-- [ ] Lint and type checking pass
+- [ ] Lint and static analysis pass
 - [ ] Code reviewed and approved
 - [ ] No TODO comments that should be resolved before launch
 - [ ] No `console.log` debugging statements in production code
@@ -32,7 +32,7 @@ Ship with confidence. The goal is not just to deploy — it's to deploy safely, 
 ### Security
 
 - [ ] No secrets in code or version control
-- [ ] `npm audit` shows no critical or high vulnerabilities
+- [ ] `govulncheck ./...` shows no critical or high vulnerabilities
 - [ ] Input validation on all user-facing endpoints
 - [ ] Authentication and authorization checks in place
 - [ ] Security headers configured (CSP, HSTS, etc.)
@@ -78,17 +78,18 @@ Ship with confidence. The goal is not just to deploy — it's to deploy safely, 
 
 Ship behind feature flags to decouple deployment from release:
 
-```typescript
-// Feature flag check
-const flags = await getFeatureFlags(userId);
-
-if (flags.taskSharing) {
-  // New feature: task sharing
-  return <TaskSharingPanel task={task} />;
+```go
+// Feature flag check.
+flags, err := featureStore.FlagsForUser(ctx, userID)
+if err != nil {
+	return err
 }
 
-// Default: existing behavior
-return null;
+if flags.TaskSharing {
+	return renderTaskSharing(ctx, task)
+}
+
+return nil
 ```
 
 **Feature flag lifecycle:**
@@ -147,7 +148,7 @@ Use these thresholds to decide whether to advance, hold, or roll back at each st
 |--------|-----------------|-------------------------------|-----------------|
 | Error rate | Within 10% of baseline | 10-100% above baseline | >2x baseline |
 | P95 latency | Within 20% of baseline | 20-50% above baseline | >50% above baseline |
-| Client JS errors | No new error types | New errors at <0.1% of sessions | New errors at >0.1% of sessions |
+| Client or API errors | No new error types | New errors at <0.1% of requests | New errors at >0.1% of requests |
 | Business metrics | Neutral or positive | Decline <5% (may be noise) | Decline >5% |
 
 ### When to Roll Back
@@ -180,46 +181,29 @@ Infrastructure metrics:
 
 Client metrics:
 ├── Core Web Vitals (LCP, INP, CLS)
-├── JavaScript errors
+├── Browser or client-side request errors
 ├── API error rates from client perspective
 └── Page load time
 ```
 
 ### Error Reporting
 
-```typescript
-// Set up error boundary with reporting
-class ErrorBoundary extends React.Component {
-  componentDidCatch(error: Error, info: React.ErrorInfo) {
-    // Report to error tracking service
-    reportError(error, {
-      componentStack: info.componentStack,
-      userId: getCurrentUser()?.id,
-      page: window.location.pathname,
-    });
-  }
-
-  render() {
-    if (this.state.hasError) {
-      return <ErrorFallback onRetry={() => this.setState({ hasError: false })} />;
-    }
-    return this.props.children;
-  }
+```go
+// Server-side error reporting middleware.
+func reportErrors(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				reportError(fmt.Errorf("panic: %v", recovered), map[string]any{
+					"method": r.Method,
+					"url":    r.URL.String(),
+				})
+				writeJSON(w, http.StatusInternalServerError, APIError{Error: ErrorBody{Code: "INTERNAL_ERROR", Message: "Something went wrong"}})
+			}
+		}()
+		next.ServeHTTP(w, r)
+	})
 }
-
-// Server-side error reporting
-app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
-  reportError(err, {
-    method: req.method,
-    url: req.url,
-    userId: req.user?.id,
-  });
-
-  // Don't expose internals to users
-  res.status(500).json({
-    error: { code: 'INTERNAL_ERROR', message: 'Something went wrong' },
-  });
-});
 ```
 
 ### Post-Launch Verification
@@ -255,7 +239,7 @@ Every deployment needs a rollback plan before it happens:
 3. Communicate: notify team of rollback
 
 ### Database Considerations
-- Migration [X] has a rollback: `npx prisma migrate rollback`
+- Migration [X] has a rollback: `go run ./cmd/migrate down 1`
 - Data inserted by new feature: [preserved / cleaned up]
 
 ### Time to Rollback

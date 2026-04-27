@@ -52,14 +52,14 @@ Each commit does one logical thing:
 ```
 # Good: Each commit is self-contained
 git log --oneline
-a1b2c3d Add task creation endpoint with validation
-d4e5f6g Add task creation form component
-h7i8j9k Connect form to API and add loading state
-m1n2o3p Add task creation tests (unit + integration)
+a1b2c3d Add config file loading and validation
+d4e5f6g Add CLI flag overrides for config path
+h7i8j9k Wire startup validation into root command
+m1n2o3p Add config loading tests (unit + integration)
 
 # Bad: Everything mixed together
 git log --oneline
-x1y2z3a Add task feature, fix sidebar, update deps, refactor utils
+x1y2z3a Add config loading, refactor logger, update deps, fix README
 ```
 
 ### 3. Descriptive Messages
@@ -70,9 +70,9 @@ Commit messages explain the *why*, not just the *what*:
 # Good: Explains intent
 feat: add email validation to registration endpoint
 
-Prevents invalid email formats from reaching the database.
-Uses Zod schema validation at the route handler level,
-consistent with existing validation patterns in auth.ts.
+Prevents invalid runtime configuration from reaching the startup path.
+Validates required fields before executing commands,
+consistent with existing config loading patterns.
 
 # Bad: Describes what's obvious from the diff
 update auth.ts
@@ -99,8 +99,8 @@ Don't combine formatting changes with behavior changes. Don't combine refactors 
 
 ```
 # Good: Separate concerns
-git commit -m "refactor: extract validation logic to shared utility"
-git commit -m "feat: add phone number validation to registration"
+git commit -m "refactor: extract config parsing into internal/config"
+git commit -m "feat: add environment override validation"
 
 # Bad: Mixed concerns
 git commit -m "refactor validation and add phone number field"
@@ -139,9 +139,9 @@ main (always deployable)
 
 ```
 feature/<short-description>   → feature/task-creation
-fix/<short-description>       → fix/duplicate-tasks
+fix/<short-description>       → fix/config-defaults
 chore/<short-description>     → chore/update-deps
-refactor/<short-description>  → refactor/auth-module
+refactor/<short-description>  → refactor/config-loader
 ```
 
 ## Working with Worktrees
@@ -194,16 +194,16 @@ After any modification, provide a structured summary. This makes review easier, 
 
 ```
 CHANGES MADE:
-- src/routes/tasks.ts: Added validation middleware to POST endpoint
-- src/lib/validation.ts: Added TaskCreateSchema using Zod
+- internal/config/config.go: Added environment override validation
+- internal/config/config_test.go: Added regression tests for invalid values
 
 THINGS I DIDN'T TOUCH (intentionally):
-- src/routes/auth.ts: Has similar validation gap but out of scope
-- src/middleware/error.ts: Error format could be improved (separate task)
+- internal/logger/logger.go: Similar cleanup available but out of scope
+- cmd/version.go: Could share flag parsing helpers later (separate task)
 
 POTENTIAL CONCERNS:
-- The Zod schema is strict — rejects extra fields. Confirm this is desired.
-- Added zod as a dependency (72KB gzipped) — already in package.json
+- Environment variables now override file values. Confirm this precedence is desired.
+- Validation fails fast at startup, which changes when misconfiguration surfaces.
 ```
 
 This pattern catches wrong assumptions early and gives reviewers a clear map of the change. The "DIDN'T TOUCH" section is especially important — it shows you exercised scope discipline and didn't go on an unsolicited renovation.
@@ -220,32 +220,29 @@ git diff --staged
 git diff --staged | grep -i "password\|secret\|api_key\|token"
 
 # 3. Run tests
-npm test
+go test ./...
 
 # 4. Run linting
-npm run lint
+golangci-lint run
 
-# 5. Run type checking
-npx tsc --noEmit
+# 5. Run static analysis
+go vet ./...
 ```
 
 Automate this with git hooks:
 
-```json
-// package.json (using lint-staged + husky)
-{
-  "lint-staged": {
-    "*.{ts,tsx}": ["eslint --fix", "prettier --write"],
-    "*.{json,md}": ["prettier --write"]
-  }
-}
+```bash
+# .git/hooks/pre-commit
+gofmt -w $(git diff --cached --name-only -- '*.go')
+golangci-lint run
+go test ./...
 ```
 
 ## Handling Generated Files
 
-- **Commit generated files** only if the project expects them (e.g., `package-lock.json`, Prisma migrations)
-- **Don't commit** build output (`dist/`, `.next/`), environment files (`.env`), or IDE config (`.vscode/settings.json` unless shared)
-- **Have a `.gitignore`** that covers: `node_modules/`, `dist/`, `.env`, `.env.local`, `*.pem`
+- **Commit generated files** only if the project expects them (e.g., code generation output or SQL migrations)
+- **Don't commit** build output (`bin/`, coverage files), environment files (`.env`), or IDE config (`.vscode/settings.json` unless shared)
+- **Have a `.gitignore`** that covers: `bin/`, `.env`, `coverage.out`, `*.test`, `*.pem`
 
 ## Using Git for Debugging
 
@@ -258,10 +255,10 @@ git bisect good <known-good-commit>
 
 # View what changed recently
 git log --oneline -20
-git diff HEAD~5..HEAD -- src/
+git diff HEAD~5..HEAD -- internal/
 
 # Find who last changed a specific line
-git blame src/services/task.ts
+git blame internal/config/config.go
 
 # Search commit messages for a keyword
 git log --grep="validation" --oneline
@@ -284,7 +281,7 @@ git log --grep="validation" --oneline
 - Commit messages like "fix", "update", "misc"
 - Formatting changes mixed with behavior changes
 - No `.gitignore` in the project
-- Committing `node_modules/`, `.env`, or build artifacts
+- Committing `bin/`, `.env`, or build artifacts
 - Long-lived branches that diverge significantly from main
 - Force-pushing to shared branches
 

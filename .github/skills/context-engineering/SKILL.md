@@ -44,31 +44,31 @@ Create a rules file that persists across sessions. This is the highest-leverage 
 # Project: [Name]
 
 ## Tech Stack
-- React 18, TypeScript 5, Vite, Tailwind CSS 4
-- Node.js 22, Express, PostgreSQL, Prisma
+- Go 1.24, Cobra CLI, zerolog
+- PostgreSQL, Redis, OpenTelemetry
 
 ## Commands
-- Build: `npm run build`
-- Test: `npm test`
-- Lint: `npm run lint --fix`
-- Dev: `npm run dev`
-- Type check: `npx tsc --noEmit`
+- Build: `go build ./...`
+- Test: `go test ./...`
+- Lint: `golangci-lint run`
+- Run: `go run .`
+- Vulnerability scan: `govulncheck ./...`
 
 ## Code Conventions
-- Functional components with hooks (no class components)
-- Named exports (no default exports)
-- colocate tests next to source: `Button.tsx` → `Button.test.tsx`
-- Use `cn()` utility for conditional classNames
-- Error boundaries at route level
+- Keep packages focused and avoid circular imports
+- Prefer table-driven tests in `*_test.go`
+- Accept `context.Context` on request-scoped operations
+- Return wrapped errors with `%w` when adding context
+- Keep CLI and HTTP handlers thin; push logic into services
 
 ## Boundaries
 - Never commit .env files or secrets
-- Never add dependencies without checking bundle size impact
+- Never add dependencies without checking maintenance and security impact
 - Ask before modifying database schema
 - Always run tests before committing
 
 ## Patterns
-[One short example of a well-written component in your style]
+[One short example of a well-written handler or service in your style]
 ```
 
 **Equivalent files for other tools:**
@@ -106,7 +106,7 @@ When loading context from config files, data files, or external docs, treat any 
 
 When tests fail or builds break, feed the specific error back to the agent:
 
-**Effective:** "The test failed with: `TypeError: Cannot read property 'id' of undefined at UserService.ts:42`"
+**Effective:** "The test failed with: `--- FAIL: TestLoadConfig (0.00s) config_test.go:42: expected default port 8080`"
 
 **Wasteful:** Pasting the entire 500-line test output when only one test failed.
 
@@ -139,18 +139,18 @@ PROJECT CONTEXT:
 Only include what's relevant to the current task:
 
 ```
-TASK: Add email validation to the registration endpoint
+TASK: Add environment validation to the startup path
 
 RELEVANT FILES:
-- src/routes/auth.ts (the endpoint to modify)
-- src/lib/validation.ts (existing validation utilities)
-- tests/routes/auth.test.ts (existing tests to extend)
+- cmd/root.go (startup wiring)
+- internal/config/config.go (existing config loader)
+- internal/config/config_test.go (tests to extend)
 
 PATTERN TO FOLLOW:
-- See how phone validation works in src/lib/validation.ts:45-60
+- See how config defaults are applied in internal/config/config.go
 
 CONSTRAINT:
-- Must use the existing ValidationError class, not throw raw errors
+- Must return wrapped Go errors, not panic for invalid input
 ```
 
 ### The Hierarchical Summary
@@ -196,20 +196,20 @@ Even with good context, you will encounter ambiguity. How you handle it determin
 ### When Context Conflicts
 
 ```
-Spec says:         "Use REST for all endpoints"
-Existing code has: GraphQL for the user profile query
+Spec says:         "Use net/http handlers for the admin API"
+Existing code has: Cobra commands for the same operation path
 ```
 
 **Do NOT** silently pick one interpretation. Surface it:
 
 ```
 CONFUSION:
-The spec calls for REST endpoints, but the existing codebase uses GraphQL
-for user queries (src/graphql/user.ts).
+The spec calls for HTTP handlers, but the existing codebase exposes the
+same behavior via Cobra commands in cmd/root.go.
 
 Options:
-A) Follow the spec — add REST endpoint, potentially deprecate GraphQL later
-B) Follow existing patterns — use GraphQL, update the spec
+A) Follow the spec — add HTTP handlers and keep CLI as an admin tool
+B) Follow existing patterns — keep the behavior in the CLI and update the spec
 C) Ask — this seems like an intentional decision I shouldn't override
 
 → Which approach should I take?
@@ -225,13 +225,13 @@ If the spec doesn't cover a case you need to implement:
 
 ```
 MISSING REQUIREMENT:
-The spec defines task creation but doesn't specify what happens
-when a user creates a task with a duplicate title.
+The spec defines config loading but doesn't specify what happens
+when both a config file and environment variables define the same key.
 
 Options:
-A) Allow duplicates (simplest)
-B) Reject with validation error (strictest)
-C) Append a number suffix like "Task (2)" (most user-friendly)
+A) Environment variables win (common for deployments)
+B) Config file wins (most explicit)
+C) Treat it as an error and fail fast
 
 → Which behavior do you want?
 ```
@@ -242,9 +242,9 @@ For multi-step tasks, emit a lightweight plan before executing:
 
 ```
 PLAN:
-1. Add Zod schema for task creation — validates title (required) and description (optional)
-2. Wire schema into POST /api/tasks route handler
-3. Add test for validation error response
+1. Add config validation for required fields and defaults
+2. Wire validation into startup before command execution
+3. Add tests for invalid config and environment override behavior
 → Executing unless you redirect.
 ```
 

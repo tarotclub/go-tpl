@@ -148,12 +148,10 @@ After each increment, the project must build and existing tests must pass. Don't
 
 If a feature isn't ready for users but you need to merge increments:
 
-```typescript
-// Feature flag for work-in-progress
-const ENABLE_TASK_SHARING = process.env.FEATURE_TASK_SHARING === 'true';
-
-if (ENABLE_TASK_SHARING) {
-  // New sharing UI
+```go
+// Feature flag for work-in-progress.
+if config.EnableTaskSharing {
+	// New sharing behavior.
 }
 ```
 
@@ -163,11 +161,12 @@ This lets you merge small increments to the main branch without exposing incompl
 
 New code should default to safe, conservative behavior:
 
-```typescript
-// Safe: disabled by default, opt-in
-export function createTask(data: TaskInput, options?: { notify?: boolean }) {
-  const shouldNotify = options?.notify ?? false;
-  // ...
+```go
+// Safe: disabled by default, opt-in.
+func CreateTask(input TaskInput, options *CreateTaskOptions) error {
+  shouldNotify := options != nil && options.Notify
+  _ = shouldNotify
+  return nil
 }
 ```
 
@@ -187,10 +186,10 @@ When directing an agent to implement incrementally:
 ```
 "Let's implement Task 3 from the plan.
 
-Start with just the database schema change and the API endpoint.
-Don't touch the UI yet — we'll do that in the next increment.
+Start with just the config parser and validation.
+Don't touch the Cobra command wiring yet — we'll do that in the next increment.
 
-After implementing, run `npm test` and `npm run build` to verify
+After implementing, run `go test ./...` and `go build ./...` to verify
 nothing is broken."
 ```
 
@@ -201,10 +200,9 @@ Be explicit about what's in scope and what's NOT in scope for each increment.
 After each increment, verify:
 
 - [ ] The change does one thing and does it completely
-- [ ] All existing tests still pass (`npm test`)
-- [ ] The build succeeds (`npm run build`)
-- [ ] Type checking passes (`npx tsc --noEmit`)
-- [ ] Linting passes (`npm run lint`)
+- [ ] All existing tests still pass (`go test ./...`)
+- [ ] The build succeeds (`go build ./...`)
+- [ ] Linting passes (`golangci-lint run`)
 - [ ] The new functionality works as expected
 - [ ] The change is committed with a descriptive message
 
