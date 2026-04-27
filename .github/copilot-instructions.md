@@ -1,5 +1,22 @@
-# Porject rules
+# Project Coding Standards
 
-## Git commit message convention
+## Testing
+- Write tests before code (TDD)
+- For bugs: write a failing test first, then fix (Prove-It pattern)
+- Test hierarchy: unit > integration > e2e (use the lowest level that captures the behavior)
+- Run `go test` after every change
 
-After code changes done, please provide a git commit message that describes the changes you made. The commit message should be concise and informative, following the format: "feat: add new feature", "fix: resolve bug", "docs: update documentation", etc. This helps maintain a clear history of changes and makes it easier for others to understand the purpose of each commit.
+## Code Quality
+- Review across five axes: correctness, readability, architecture, security, performance
+- Every PR must pass: lint, type check, tests, build
+- No secrets in code or version control
+
+## Implementation
+- Build in small, verifiable increments
+- Each increment: implement → test → verify → commit
+- Never mix formatting changes with behavior changes
+
+## Boundaries
+- Always: Run tests before commits, validate user input
+- Ask first: Database schema changes, new dependencies
+- Never: Commit secrets, remove failing tests, skip verification
