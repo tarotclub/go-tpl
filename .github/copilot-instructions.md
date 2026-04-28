@@ -15,6 +15,7 @@
 - Build in small, verifiable increments
 - Each increment: implement → test → verify → commit
 - Never mix formatting changes with behavior changes
+- After code changes, provide a brief and clear commit message
 
 ## Boundaries
 - Always: Run tests before commits, validate user input
